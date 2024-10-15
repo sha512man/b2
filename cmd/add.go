@@ -1,10 +1,10 @@
 package cmd
 
 import (
-	"crypto/md5"
 	"fmt"
 	"github.com/charmbracelet/huh"
 	"github.com/spf13/cobra"
+	"github.com/spf13/viper"
 	"gopkg.in/yaml.v3"
 	"os"
 	"os/exec"
@@ -12,24 +12,16 @@ import (
 	"time"
 )
 
+// TODO extract into separate file
 type Metadata struct {
 	Description     string   `yaml:"description"`
 	CreatedAt       string   `yaml:"created_at"`
 	MatchingQueries []string `yaml:"matching_queries"`
 }
 
-type Query struct {
-	Content string `yaml:"content"`
-	Target  string `yaml:"target"`
-}
-
-type GlobalMetadata struct {
-	Queries map[string]Query `yaml:"queries"`
-}
-
 var addCmd = &cobra.Command{
 	Use:   "add [dirname]",
-	Short: "Adds a new entry to your second brain.",
+	Short: "Add a new entry to your second brain.",
 	Long: `Creates a new directory in $B2_DIR with metadata.yaml.
 
 You will provide a human readable description of what does the entry contain.
@@ -40,15 +32,28 @@ It is later used during lookups.`,
 			return
 		}
 
-		b2Dir := os.Getenv("B2_DIR")
+		viper.SetConfigName("config")
+		viper.SetConfigType("yaml")
+		viper.AddConfigPath("$HOME/.config/b2/")
+
+		if err := viper.ReadInConfig(); err != nil {
+			fmt.Printf("Failed to read config file: %s\n", err.Error())
+			return
+		}
+
+		b2Dir := viper.GetString("B2_DIR")
+
 		if b2Dir == "" {
 			homeDir, err := os.UserHomeDir()
+
 			if err != nil {
 				fmt.Printf("Failed to get user home directory: %s\n", err.Error())
 				return
 			}
+
 			b2Dir = filepath.Join(homeDir, "b2")
 		}
+
 		newDir := filepath.Join(b2Dir, args[0])
 
 		var description string
@@ -80,37 +85,6 @@ It is later used during lookups.`,
 
 			if err := encoder.Encode(metadata); err != nil {
 				fmt.Printf("Failed to write metadata: %s\n", err.Error())
-				return
-			}
-		}
-
-		queryHash := fmt.Sprintf("%x", md5.Sum([]byte(description)))
-		globalMetadataFile := filepath.Join(b2Dir, "metadata.yaml")
-
-		globalMetadata := GlobalMetadata{
-			Queries: make(map[string]Query),
-		}
-
-		globalMetadata.Queries[queryHash] = Query{
-			Content: description,
-			Target:  newDir,
-		}
-
-		if data, err := os.ReadFile(globalMetadataFile); err == nil {
-			yaml.Unmarshal(data, &globalMetadata)
-		}
-
-		if file, err := os.Create(globalMetadataFile); err != nil {
-			fmt.Printf("Failed to create global metadata file: %s\n", err.Error())
-			return
-		} else {
-			defer file.Close()
-
-			encoder := yaml.NewEncoder(file)
-			defer encoder.Close()
-
-			if err := encoder.Encode(globalMetadata); err != nil {
-				fmt.Printf("Failed to write global metadata: %s\n", err.Error())
 				return
 			}
 		}
